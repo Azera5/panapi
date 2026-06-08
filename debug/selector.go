@@ -1,9 +1,10 @@
 package debug
 
 import (
-	"github.com/netsec-ethz/scion-apps/pkg/pan"
+	"context"
 	"log"
 	"time"
+	"github.com/netsec-ethz/scion-apps/pkg/pan"
 )
 
 type DebugSelector struct {
@@ -26,10 +27,10 @@ func (s *DebugSelector) Initialize(local, remote pan.UDPAddr, paths []*pan.Path)
 	log.Println("Return Initialize")
 }
 
-func (s *DebugSelector) Path() *pan.Path {
+func (s *DebugSelector) Path(ctx context.Context) *pan.Path {
 	log.Println("Enter Path")
 	time.Sleep(s.delay)
-	res := s.s.Path()
+	res := s.s.Path(context.Background())
 	log.Println("Return Path")
 	return res
 }

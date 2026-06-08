@@ -5,19 +5,19 @@ import (
 	"crypto/tls"
 	"errors"
 
-	"github.com/lucas-clemente/quic-go"
 	"github.com/netsys-lab/panapi/taps"
+	"github.com/quic-go/quic-go"
 )
 
 type listener struct {
 	pre *taps.Preconnection
-	l   quic.Listener
+	l   *quic.Listener
 }
 
 type Connection struct {
-	quic.Stream
+	*quic.Stream
 	pre *taps.Preconnection
-	quic.Session
+	*quic.Conn
 }
 
 func (c *Connection) Preconnection() *taps.Preconnection {
@@ -26,7 +26,7 @@ func (c *Connection) Preconnection() *taps.Preconnection {
 
 func (c *Connection) Close() error {
 	c.Stream.Close()
-	return c.Session.CloseWithError(0, "closed")
+	return c.Conn.CloseWithError(0, "closed")
 }
 
 func (l *listener) Accept() (taps.Connection, error) {
@@ -98,7 +98,7 @@ func (q *Protocol) Initiate(p *taps.Preconnection) (taps.Connection, error) {
 		InsecureSkipVerify: true,
 		NextProtos:         []string{"panapi-quic-test"},
 	}*/
-	session, err := quic.DialAddr(p.RemoteEndpoint.Address, q.TLSConfig, q.QuicConfig)
+	session, err := quic.DialAddr(context.Background(), p.RemoteEndpoint.Address, q.TLSConfig, q.QuicConfig)
 	if err != nil {
 		return nil, err
 	}

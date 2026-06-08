@@ -14,9 +14,9 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
-	"io"
 	"log"
 	"net"
 	"os"
@@ -25,12 +25,12 @@ import (
 
 	"runtime/pprof"
 
-	"github.com/lucas-clemente/quic-go/logging"
-	"github.com/lucas-clemente/quic-go/qlog"
 	"github.com/netsec-ethz/scion-apps/pkg/pan"
 	"github.com/netsys-lab/panapi/lua"
 	"github.com/netsys-lab/panapi/rpc"
 	"github.com/netsys-lab/panapi/taps"
+	"github.com/quic-go/quic-go/logging"
+	"github.com/quic-go/quic-go/qlog"
 )
 
 func main() {
@@ -79,21 +79,23 @@ func main() {
 		})
 	}
 
-	tracer := qlog.NewTracer(
-		func(p logging.Perspective, connectionID []byte) io.WriteCloser {
-			fname := fmt.Sprintf("/tmp/quic-tracer-%d-%x.log", p, connectionID)
-			log.Println("quic tracer file opened as", fname)
-			f, err := os.Create(fname)
-			if err != nil {
-				panic(err)
-			}
-			return f
-		})
-	//serverselector := rpc.NewServerSelectorFunc(func(raddr,
-	server, err := rpc.NewServer(selector, tracer, stats)
+	tracer := &logging.Tracer{}
+	_ = tracer
+	connTracerFunc := func(ctx context.Context, p logging.Perspective, connID logging.ConnectionID) *logging.ConnectionTracer {
+		fname := fmt.Sprintf("/tmp/quic-tracer-%d-%x.qlog", p, connID)
+		log.Println("quic tracer file opened as", fname)
+		f, err := os.Create(fname)
+		if err != nil {
+			panic(err)
+		}
+		return qlog.NewConnectionTracer(f, p, connID)
+	}
+	_ = connTracerFunc
+	server, err := rpc.NewServer(selector, *tracer, stats)
 	if err != nil {
 		log.Fatalln(err)
 	}
+
 	go func() {
 		log.Println("Started listening for rpc calls")
 		server.Accept(l)

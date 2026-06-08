@@ -20,20 +20,21 @@ import (
 	"net"
 	"time"
 
-	"github.com/lucas-clemente/quic-go/logging"
 	"github.com/netsec-ethz/scion-apps/pkg/pan"
+	"github.com/quic-go/quic-go"
+	"github.com/quic-go/quic-go/logging"
 )
 
 type ServerConnectionTracer interface {
 	TracerForConnection(id uint64, p logging.Perspective, odcid logging.ConnectionID) error
 	StartedConnection(local, remote *pan.UDPAddr, srcConnID, destConnID logging.ConnectionID) error
-	NegotiatedVersion(local, remote *pan.UDPAddr, chosen logging.VersionNumber, clientVersions, serverVersions []logging.VersionNumber) error
+	NegotiatedVersion(local, remote *pan.UDPAddr, chosen logging.Version, clientVersions, serverVersions []logging.Version) error
 	ClosedConnection(local, remote *pan.UDPAddr, err error) error
 	SentTransportParameters(*pan.UDPAddr, *pan.UDPAddr, *logging.TransportParameters) error
 	ReceivedTransportParameters(*pan.UDPAddr, *pan.UDPAddr, *logging.TransportParameters) error
 	RestoredTransportParameters(local, remote *pan.UDPAddr, parameters *logging.TransportParameters) error
 	SentPacket(local, remote *pan.UDPAddr, hdr *logging.ExtendedHeader, size logging.ByteCount, ack *logging.AckFrame, frames []logging.Frame) error
-	ReceivedVersionNegotiationPacket(*pan.UDPAddr, *pan.UDPAddr, *logging.Header, []logging.VersionNumber) error
+	ReceivedVersionNegotiationPacket(*pan.UDPAddr, *pan.UDPAddr, *logging.Header, []logging.Version) error
 	ReceivedRetry(*pan.UDPAddr, *pan.UDPAddr, *logging.Header) error
 	ReceivedPacket(local, remote *pan.UDPAddr, hdr *logging.ExtendedHeader, size logging.ByteCount, frames []logging.Frame) error
 	BufferedPacket(*pan.UDPAddr, *pan.UDPAddr, logging.PacketType) error
@@ -71,9 +72,9 @@ func NewRTTStats(stats *logging.RTTStats) *RTTStats {
 
 type ConnectionTracerMsg struct {
 	Local, Remote                            *pan.UDPAddr
-	OdcID, SrcConnID, DestConnID             *logging.ConnectionID
-	Chosen                                   logging.VersionNumber
-	Versions, ClientVersions, ServerVersions []logging.VersionNumber
+	OdcID, SrcConnID, DestConnID             []byte
+	Chosen                                   logging.Version
+	Versions, ClientVersions, ServerVersions []logging.Version
 	ErrorMsg, Key, Value                     *string
 	Parameters                               *logging.TransportParameters
 	ByteCount, Cwnd                          logging.ByteCount
@@ -145,7 +146,7 @@ type ConnectionTracerClient struct {
 func (c *ConnectionTracerClient) new_msg() *ConnectionTracerMsg {
 	return &ConnectionTracerMsg{
 		Perspective: c.p,
-		OdcID:       &c.odcid,
+		OdcID:       connIDToBytes(c.odcid),
 		ID:          c.rpc.id,
 		TracingID:   c.tracing_id,
 		Local:       c.local,
@@ -158,7 +159,7 @@ func NewConnectionTracerClient(client *Client, id uint64, p logging.Perspective,
 	err := client.Call("ConnectionTracerServer.NewTracerForConnection",
 		&ConnectionTracerMsg{
 			Perspective: p,
-			OdcID:       &odcid,
+			OdcID:       connIDToBytes(odcid),
 			ID:          client.id,
 			TracingID:   id,
 		},
@@ -168,7 +169,40 @@ func NewConnectionTracerClient(client *Client, id uint64, p logging.Perspective,
 		client.l.Fatalln(err)
 	}
 
-	return &ConnectionTracerClient{client, client.l, p, odcid, id, nil, nil}
+	c := &ConnectionTracerClient{client, client.l, p, odcid, id, nil, nil}
+	return logging.ConnectionTracer{
+		StartedConnection:                c.StartedConnection,
+		NegotiatedVersion:                c.NegotiatedVersion,
+		ClosedConnection:                 c.ClosedConnection,
+		SentTransportParameters:          c.SentTransportParameters,
+		ReceivedTransportParameters:      c.ReceivedTransportParameters,
+		RestoredTransportParameters:      c.RestoredTransportParameters,
+		SentLongHeaderPacket:             c.SentLongHeaderPacket,
+		SentShortHeaderPacket:            nil,
+		ReceivedVersionNegotiationPacket: c.ReceivedVersionNegotiationPacket,
+		ReceivedRetry:                    c.ReceivedRetry,
+		ReceivedLongHeaderPacket:         c.ReceivedLongHeaderPacket,
+		ReceivedShortHeaderPacket:        nil,
+		BufferedPacket:                   c.BufferedPacket,
+		DroppedPacket:                    c.DroppedPacket,
+		UpdatedMetrics:                   c.UpdatedMetrics,
+		AcknowledgedPacket:               c.AcknowledgedPacket,
+		LostPacket:                       c.LostPacket,
+		UpdatedMTU:                       nil,
+		UpdatedCongestionState:           c.UpdatedCongestionState,
+		UpdatedPTOCount:                  c.UpdatedPTOCount,
+		UpdatedKeyFromTLS:                c.UpdatedKeyFromTLS,
+		UpdatedKey:                       c.UpdatedKey,
+		DroppedEncryptionLevel:           c.DroppedEncryptionLevel,
+		DroppedKey:                       c.DroppedKey,
+		SetLossTimer:                     c.SetLossTimer,
+		LossTimerExpired:                 c.LossTimerExpired,
+		LossTimerCanceled:                c.LossTimerCanceled,
+		ECNStateUpdated:                  nil,
+		ChoseALPN:                        nil,
+		Close:                            c.Close,
+		Debug:                            c.Debug,
+	}
 }
 
 func (c *ConnectionTracerClient) StartedConnection(local, remote net.Addr, srcConnID, destConnID logging.ConnectionID) {
@@ -181,8 +215,8 @@ func (c *ConnectionTracerClient) StartedConnection(local, remote net.Addr, srcCo
 
 	msg.Local = &l
 	msg.Remote = &r
-	msg.SrcConnID = &srcConnID
-	msg.DestConnID = &destConnID
+	msg.SrcConnID = connIDToBytes(srcConnID)
+	msg.DestConnID = connIDToBytes(destConnID)
 
 	err := c.rpc.Call("ConnectionTracerServer.StartedConnection",
 		msg,
@@ -192,7 +226,7 @@ func (c *ConnectionTracerClient) StartedConnection(local, remote net.Addr, srcCo
 		c.l.Fatalln(err)
 	}
 }
-func (c *ConnectionTracerClient) NegotiatedVersion(chosen logging.VersionNumber, clientVersions, serverVersions []logging.VersionNumber) {
+func (c *ConnectionTracerClient) NegotiatedVersion(chosen logging.Version, clientVersions, serverVersions []logging.Version) {
 	//c.l.Printf("NegotiatedVersion")
 	msg := c.new_msg()
 	msg.Chosen = chosen
@@ -256,7 +290,7 @@ func (c *ConnectionTracerClient) RestoredTransportParameters(parameters *logging
 		c.l.Fatalln(err)
 	}
 }
-func (c *ConnectionTracerClient) SentPacket(hdr *logging.ExtendedHeader, size logging.ByteCount, ack *logging.AckFrame, frames []logging.Frame) {
+func (c *ConnectionTracerClient) SentLongHeaderPacket(hdr *logging.ExtendedHeader, size logging.ByteCount, ecn logging.ECN, ack *logging.AckFrame, frames []logging.Frame) {
 	//c.l.Printf("SentPacket")
 	msg := c.new_msg()
 	msg.ExtendedHeader = hdr
@@ -271,10 +305,9 @@ func (c *ConnectionTracerClient) SentPacket(hdr *logging.ExtendedHeader, size lo
 		c.l.Fatalln(err)
 	}
 }
-func (c *ConnectionTracerClient) ReceivedVersionNegotiationPacket(hdr *logging.Header, versions []logging.VersionNumber) {
+func (c *ConnectionTracerClient) ReceivedVersionNegotiationPacket(dest, src logging.ArbitraryLenConnectionID, versions []logging.Version) {
 	//c.l.Printf("ReceivedVersionNegotiationPacket")
 	msg := c.new_msg()
-	msg.Header = hdr
 	msg.Versions = versions
 
 	err := c.rpc.Call("ConnectionTracerServer.ReceivedVersionNegotiationPacket",
@@ -297,7 +330,7 @@ func (c *ConnectionTracerClient) ReceivedRetry(hdr *logging.Header) {
 		c.l.Fatalln(err)
 	}
 }
-func (c *ConnectionTracerClient) ReceivedPacket(hdr *logging.ExtendedHeader, size logging.ByteCount, frames []logging.Frame) {
+func (c *ConnectionTracerClient) ReceivedLongHeaderPacket(hdr *logging.ExtendedHeader, size logging.ByteCount, ecn logging.ECN, frames []logging.Frame) {
 	//c.l.Printf("ReceivedPacket")
 	msg := c.new_msg()
 	msg.ExtendedHeader = hdr
@@ -311,7 +344,7 @@ func (c *ConnectionTracerClient) ReceivedPacket(hdr *logging.ExtendedHeader, siz
 		c.l.Fatalln(err)
 	}
 }
-func (c *ConnectionTracerClient) BufferedPacket(ptype logging.PacketType) {
+func (c *ConnectionTracerClient) BufferedPacket(ptype logging.PacketType, size logging.ByteCount) {
 	//c.l.Printf("BufferedPacket")
 	msg := c.new_msg()
 	msg.PacketType = ptype
@@ -323,7 +356,7 @@ func (c *ConnectionTracerClient) BufferedPacket(ptype logging.PacketType) {
 		c.l.Fatalln(err)
 	}
 }
-func (c *ConnectionTracerClient) DroppedPacket(ptype logging.PacketType, size logging.ByteCount, reason logging.PacketDropReason) {
+func (c *ConnectionTracerClient) DroppedPacket(ptype logging.PacketType, pn logging.PacketNumber, size logging.ByteCount, reason logging.PacketDropReason) {
 	//c.l.Printf("DroppedPacket")
 	msg := c.new_msg()
 	msg.PacketType = ptype
@@ -532,7 +565,7 @@ func (c *ConnectionTracerServer) NewTracerForConnection(args *ConnectionTracerMs
 		return ErrDeref
 	}
 	tracing_id := args.TracingID
-	return c.ct.TracerForConnection(tracing_id, args.Perspective, *args.OdcID)
+	return c.ct.TracerForConnection(tracing_id, args.Perspective, bytesToConnID(args.OdcID))
 
 }
 
@@ -541,7 +574,7 @@ func (c *ConnectionTracerServer) StartedConnection(args *ConnectionTracerMsg, re
 	if args.Local == nil || args.Remote == nil || args.SrcConnID == nil || args.DestConnID == nil {
 		return ErrDeref
 	}
-	return c.ct.StartedConnection(args.Local, args.Remote, *args.SrcConnID, *args.DestConnID)
+	return c.ct.StartedConnection(args.Local, args.Remote, bytesToConnID(args.SrcConnID), bytesToConnID(args.DestConnID))
 }
 
 func (c *ConnectionTracerServer) NegotiatedVersion(args *ConnectionTracerMsg, resp *NilMsg) error {
@@ -677,4 +710,12 @@ func (c *ConnectionTracerServer) Debug(args *ConnectionTracerMsg, resp *NilMsg) 
 		return ErrDeref
 	}
 	return c.ct.Debug(args.Local, args.Remote, *args.Key, *args.Value)
+}
+
+func connIDToBytes(id logging.ConnectionID) []byte {
+	return id.Bytes()
+}
+
+func bytesToConnID(b []byte) logging.ConnectionID {
+	return quic.ConnectionIDFromBytes(b)
 }

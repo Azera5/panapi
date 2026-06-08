@@ -17,9 +17,9 @@ import (
 	"context"
 	"net"
 
-	"github.com/scionproto/scion/go/lib/addr"
-	"github.com/scionproto/scion/go/lib/snet"
-	"github.com/scionproto/scion/go/lib/sock/reliable"
+	"github.com/scionproto/scion/pkg/addr"
+	"github.com/scionproto/scion/pkg/snet"
+	// "github.com/scionproto/scion/go/lib/sock/reliable"
 )
 
 type TimedPacketDispatcherService struct {
@@ -28,7 +28,7 @@ type TimedPacketDispatcherService struct {
 }
 
 func (s *TimedPacketDispatcherService) Register(ctx context.Context, ia addr.IA,
-	registration *net.UDPAddr, svc addr.HostSVC) (snet.PacketConn, uint16, error) {
+	registration *net.UDPAddr, svc addr.SVC) (snet.PacketConn, uint16, error) {
 
 	rconn, port, err := s.Dispatcher.Register(ctx, ia, registration, svc)
 	if err != nil {

@@ -17,6 +17,7 @@ import (
 	"errors"
 	"log"
 	"net"
+	"context"
 
 	"github.com/netsec-ethz/scion-apps/pkg/pan"
 	"github.com/netsys-lab/panapi/taps"
@@ -68,7 +69,7 @@ func (s serverSelector) SetPreferences(prefs *taps.ConnectionPreferences, local,
 }
 
 func (s serverSelector) Path(local, remote pan.UDPAddr) (*pan.Path, error) {
-	return s.getSelector(local, remote).Path(), nil
+	return s.getSelector(local, remote).Path(context.Background()), nil
 }
 
 func (s serverSelector) PathDown(local, remote pan.UDPAddr, fp pan.PathFingerprint, pi pan.PathInterface) error {
@@ -229,7 +230,7 @@ func (s *SelectorClient) SetPreferences(prefs *taps.ConnectionPreferences) error
 		return nil
 	}
 }
-func (s *SelectorClient) Path() *pan.Path {
+func (s *SelectorClient) Path(ctx context.Context) *pan.Path {
 	//s.l.Println("Path called")
 	msg := SelectorMsg{}
 	err := s.client.Call("SelectorServer.Path", &SelectorMsg{

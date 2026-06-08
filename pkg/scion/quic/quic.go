@@ -4,22 +4,22 @@ import (
 	"context"
 	"crypto/tls"
 	"errors"
+	"net/netip"
 
-	"github.com/lucas-clemente/quic-go"
 	"github.com/netsec-ethz/scion-apps/pkg/pan"
 	"github.com/netsys-lab/panapi/taps"
-	"inet.af/netaddr"
+	"github.com/quic-go/quic-go"
 )
 
 type listener struct {
 	p *taps.Preconnection
-	l quic.Listener
+	l *pan.QUICListener
 }
 
 type Connection struct {
-	quic.Stream
+	*quic.Stream
 	p *taps.Preconnection
-	quic.Session
+	*quic.Conn
 }
 
 func (c *Connection) Preconnection() *taps.Preconnection {
@@ -28,7 +28,7 @@ func (c *Connection) Preconnection() *taps.Preconnection {
 
 func (c *Connection) Close() error {
 	c.Stream.Close()
-	return c.Session.CloseWithError(0, "closed")
+	return c.Conn.CloseWithError(0, "closed")
 }
 
 func (l *listener) Accept() (taps.Connection, error) {
@@ -85,7 +85,7 @@ func (q *Protocol) NewListener(p *taps.Preconnection) (taps.Listener, error) {
 	if err != nil {
 		return nil, err
 	}
-	addr, err := pan.ResolveUDPAddr(p.LocalEndpoint.Address)
+	addr, err := pan.ResolveUDPAddr(context.Background(), p.LocalEndpoint.Address)
 	if err != nil {
 		return nil, err
 	}
@@ -97,40 +97,70 @@ func (q *Protocol) NewListener(p *taps.Preconnection) (taps.Listener, error) {
 	}
 	l, err := pan.ListenQUIC(
 		context.Background(),
-		netaddr.IPPortFrom(addr.IP, addr.Port),
-		nil,
+		netip.AddrPortFrom(addr.IP, addr.Port),
 		q.Config.TLS,
 		q.Config.Quic,
 	)
 	return &listener{p: p, l: l}, err
 }
 
+// func (q *Protocol) Initiate(p *taps.Preconnection) (taps.Connection, error) {
+// 	addr, err := pan.ResolveUDPAddr(context.Background(), p.RemoteEndpoint.Address)
+// 	if err != nil {
+// 		return nil, err
+// 	}
+// 	if q.Config.Selector != nil {
+// 		err = q.Config.Selector.SetPreferences(p.ConnectionPreferences)
+// 		if err != nil {
+// 			return nil, err
+// 		}
+// 	}
+// 	session, err := pan.DialQUIC(
+// 		context.Background(),
+// 		netip.AddrPort{},
+// 		addr,
+// 		"",
+// 		q.Config.TLS,
+// 		q.Config.Quic,
+// 	)
+// 	if err != nil {
+// 		return nil, err
+// 	}
+
+// 	stream, err := session.OpenStream() //Sync(context.Background())
+// 	return &Connection{stream, p, session.Conn}, err
+
+// }
+
 func (q *Protocol) Initiate(p *taps.Preconnection) (taps.Connection, error) {
-	addr, err := pan.ResolveUDPAddr(p.RemoteEndpoint.Address)
+	addr, err := pan.ResolveUDPAddr(context.Background(), p.RemoteEndpoint.Address)
 	if err != nil {
 		return nil, err
 	}
+
+	var connOptions []pan.ConnOptions
 	if q.Config.Selector != nil {
-		err = q.Config.Selector.SetPreferences(p.ConnectionPreferences)
-		if err != nil {
-			return nil, err
+		if p.ConnectionPreferences != nil {
+			err = q.Config.Selector.SetPreferences(p.ConnectionPreferences)
+			if err != nil {
+				return nil, err
+			}
 		}
+		connOptions = append(connOptions, pan.WithSelector(q.Config.Selector))
 	}
+
 	session, err := pan.DialQUIC(
 		context.Background(),
-		netaddr.IPPort{},
+		netip.AddrPort{},
 		addr,
-		nil,
-		q.Config.Selector,
 		"",
 		q.Config.TLS,
 		q.Config.Quic,
+		connOptions...,
 	)
 	if err != nil {
 		return nil, err
 	}
-
-	stream, err := session.OpenStream() //Sync(context.Background())
-	return &Connection{stream, p, session}, err
-
+	stream, err := session.OpenStream()
+	return &Connection{stream, p, session.Conn}, err
 }

@@ -1,18 +1,22 @@
 package convenience
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/pem"
+	"fmt"
+	"log"
 	"math/big"
 	"net"
-
-	"github.com/lucas-clemente/quic-go/logging"
+	"os"
 
 	"github.com/netsys-lab/panapi/rpc"
 	"github.com/netsys-lab/panapi/taps"
+	"github.com/quic-go/quic-go/logging"
+	"github.com/quic-go/quic-go/qlog"
 )
 
 func GenerateTLSConfig() tls.Config {
@@ -48,13 +52,33 @@ func NewRPCClient() (*rpc.Client, error) {
 	return rpc.NewClient(conn)
 }
 
-func RPCClientHelper() (selector taps.Selector, tracer logging.Tracer, err error) {
-	var c *rpc.Client
-	c, err = NewRPCClient()
+// func RPCClientHelper() (selector taps.Selector, tracer func(context.Context, logging.Perspective, logging.ConnectionID) *logging.ConnectionTracer, err error) {
+// 	c, err := NewRPCClient()
+// 	if err != nil {
+// 		return
+// 	}
+// 	selector = rpc.NewSelectorClient(c)
+// 	tracer = rpc.NewTracerForConnection(c)
+// 	return
+// }
+
+func RPCClientHelper() (selector taps.Selector, tracerFunc func(context.Context, logging.Perspective, logging.ConnectionID) *logging.ConnectionTracer,
+	err error,
+) {
+	c, err := NewRPCClient()
 	if err != nil {
 		return
 	}
 	selector = rpc.NewSelectorClient(c)
-	tracer = rpc.NewTracerClient(c)
+	// Temporary workaround: tracer runs locally because of an error: "connection_tracer.go:169: gob: type protocol.ConnectionID has no exported fields"
+	tracerFunc = func(ctx context.Context, p logging.Perspective, connID logging.ConnectionID) *logging.ConnectionTracer {
+		fname := fmt.Sprintf("/tmp/quic-tracer-%d-%x.qlog", p, connID)
+		log.Println("quic tracer file opened as", fname)
+		f, err := os.Create(fname)
+		if err != nil {
+			panic(err)
+		}
+		return qlog.NewConnectionTracer(f, p, connID)
+	}
 	return
 }

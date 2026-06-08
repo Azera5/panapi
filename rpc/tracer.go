@@ -21,57 +21,64 @@ import (
 	"os"
 	"time"
 
-	"github.com/lucas-clemente/quic-go"
-	"github.com/lucas-clemente/quic-go/logging"
+	"github.com/quic-go/quic-go"
+	"github.com/quic-go/quic-go/logging"
 )
 
-type TracerClient struct {
+type tracerClient struct {
 	rpc *Client
 	l   *log.Logger
 }
 
 func NewTracerClient(client *Client) logging.Tracer {
-	return &TracerClient{client, client.l}
-}
+	c := &tracerClient{client, client.l}
 
-func (c TracerClient) TracerForConnection(ctx context.Context, p logging.Perspective, odcid logging.ConnectionID) logging.ConnectionTracer {
-
-	id, ok := ctx.Value(quic.SessionTracingKey).(uint64)
-	if !ok {
-		c.l.Fatalln("cast failed")
+	return logging.Tracer{
+		SentPacket: func(addr net.Addr, hdr *logging.Header, n logging.ByteCount, fs []logging.Frame) {
+			c.l.Printf("SentPacket %+v %+v %+v %+v", addr, hdr, n, fs)
+			c.rpc.Call(
+				"TracerServer.SentPacket",
+				&TracerMsg{
+					ID:        &c.rpc.id,
+					Addr:      addr,
+					Header:    hdr,
+					ByteCount: &n,
+					Frames:    fs,
+				},
+				&TracerMsg{},
+			)
+		},
+		DroppedPacket: func(addr net.Addr, tp logging.PacketType, n logging.ByteCount, r logging.PacketDropReason) {
+			c.l.Printf("DroppedPacket %+v %+v %+v %+v", addr, tp, n, r)
+			c.rpc.Call(
+				"TracerServer.DroppedPacket",
+				&TracerMsg{
+					ID:         &c.rpc.id,
+					Addr:       addr,
+					PacketType: &tp,
+					ByteCount:  &n,
+					DropReason: &r,
+				},
+				&TracerMsg{},
+			)
+		},
+		SentVersionNegotiationPacket: nil,
+		Debug:                        nil,
+		Close:                        nil,
 	}
-	c.l.Printf("TracerForConnection %d %d", p, id)
-	return NewConnectionTracerClient(c.rpc, id, p, odcid)
 }
 
-func (c TracerClient) SentPacket(addr net.Addr, hdr *logging.Header, n logging.ByteCount, fs []logging.Frame) {
-	c.l.Printf("SentPacket %+v %+v %+v %+v", addr, hdr, n, fs)
-	c.rpc.Call(
-		"TracerServer.SentPacket",
-		&TracerMsg{
-			ID:        &c.rpc.id,
-			Addr:      addr,
-			Header:    hdr,
-			ByteCount: &n,
-			Frames:    fs,
-		},
-		&TracerMsg{},
-	)
-}
-
-func (c TracerClient) DroppedPacket(addr net.Addr, tp logging.PacketType, n logging.ByteCount, r logging.PacketDropReason) {
-	c.l.Printf("DroppedPacket %+v %+v %+v %+v", addr, tp, n, r)
-	c.rpc.Call(
-		"TracerServer.DroppedPacket",
-		&TracerMsg{
-			ID:         &c.rpc.id,
-			Addr:       addr,
-			PacketType: &tp,
-			ByteCount:  &n,
-			DropReason: &r,
-		},
-		&TracerMsg{},
-	)
+func NewTracerForConnection(client *Client) func(ctx context.Context, p logging.Perspective, odcid logging.ConnectionID) *logging.ConnectionTracer {
+	c := &tracerClient{client, client.l}
+	return func(ctx context.Context, p logging.Perspective, odcid logging.ConnectionID) *logging.ConnectionTracer {
+		id, ok := ctx.Value(quic.ConnectionTracingKey).(uint64)
+		if !ok {
+			c.l.Println("cast failed: ConnectionTracingKey not found in context")
+		}
+		c.l.Printf("TracerForConnection %d %d", p, id)
+		ct := NewConnectionTracerClient(c.rpc, id, p, odcid)
+		return &ct
+	}
 }
 
 type TracerMsg struct {
@@ -123,7 +130,9 @@ func NewTracerServer(tracer logging.Tracer) *TracerServer {
 func (s *TracerServer) SentPacket(args, resp *TracerMsg) error {
 	if args.Addr != nil && args.ByteCount != nil {
 		s.l.Printf("SentPacket %+v %+v %+v %+v", args.Addr, args.Header, *args.ByteCount, args.Frames)
-		s.tracer.SentPacket(args.Addr, args.Header, *args.ByteCount, args.Frames)
+		if s.tracer.SentPacket != nil {
+			s.tracer.SentPacket(args.Addr, args.Header, *args.ByteCount, args.Frames)
+		}
 	} else {
 		return ErrDeref
 	}
@@ -133,7 +142,9 @@ func (s *TracerServer) SentPacket(args, resp *TracerMsg) error {
 func (s *TracerServer) DroppedPacket(args, resp *TracerMsg) error {
 	if args.Addr != nil && args.PacketType != nil && args.ByteCount != nil && args.DropReason != nil {
 		s.l.Printf("DroppedPacket %+v %+v %+v %+v", args.Addr, *args.PacketType, *args.ByteCount, *args.DropReason)
-		s.tracer.DroppedPacket(args.Addr, *args.PacketType, *args.ByteCount, *args.DropReason)
+		if s.tracer.DroppedPacket != nil {
+			s.tracer.DroppedPacket(args.Addr, *args.PacketType, *args.ByteCount, *args.DropReason)
+		}
 	} else {
 		return ErrDeref
 	}

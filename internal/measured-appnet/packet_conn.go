@@ -14,13 +14,14 @@
 package measured_appnet
 
 import (
+	"fmt"
 	"log"
 	"net"
 	"time"
 
-	"github.com/scionproto/scion/go/lib/serrors"
-	"github.com/scionproto/scion/go/lib/slayers"
-	"github.com/scionproto/scion/go/lib/snet"
+	// "github.com/scionproto/scion/go/lib/serrors"
+	"github.com/scionproto/scion/pkg/slayers"
+	"github.com/scionproto/scion/pkg/snet"
 )
 
 func timeTrack(start time.Time, name string) {
@@ -49,7 +50,7 @@ func (c *TimedSCIONPacketConn) Close() error {
 func (c *TimedSCIONPacketConn) WriteTo(pkt *snet.Packet, ov *net.UDPAddr) error {
 	defer timeTrack(time.Now(), "WriteTo")
 	if err := pkt.Serialize(); err != nil {
-		return serrors.WrapStr("serialize SCION packet", err)
+		return fmt.Errorf("serialize SCION packet", err)
 	}
 
 	_, err := c.conn.WriteTo(pkt.Bytes, ov)
@@ -57,7 +58,7 @@ func (c *TimedSCIONPacketConn) WriteTo(pkt *snet.Packet, ov *net.UDPAddr) error 
 	c.timed = time.Now()
 
 	if err != nil {
-		return serrors.WrapStr("Reliable socket write error", err)
+		return fmt.Errorf("Reliable socket write error", err)
 	}
 	return nil
 }
@@ -76,10 +77,15 @@ func (c *TimedSCIONPacketConn) ReadFrom(pkt *snet.Packet, ov *net.UDPAddr) error
 
 		if scmp, ok := pkt.Payload.(snet.SCMPPayload); ok {
 			if c.scmpHandler == nil {
-				return serrors.New("scmp packet received, but no handler found",
-					"type_code", slayers.CreateSCMPTypeCode(scmp.Type(), scmp.Code()),
-					"src", pkt.Source)
+				// 	return serrors.New("scmp packet received, but no handler found",
+				// 		"type_code", slayers.CreateSCMPTypeCode(scmp.Type(), scmp.Code()),
+				// 		"src", pkt.Source)
+				// }
+
+				return fmt.Errorf("scmp packet received, but no handler found: type_code=%v src=%v",
+					slayers.CreateSCMPTypeCode(scmp.Type(), scmp.Code()), pkt.Source)
 			}
+
 			if err := c.scmpHandler.Handle(pkt); err != nil {
 				return err
 			}
@@ -94,7 +100,7 @@ func (c *TimedSCIONPacketConn) readFrom(pkt *snet.Packet, ov *net.UDPAddr) error
 	pkt.Prepare()
 	n, lastHopNetAddr, err := c.conn.ReadFrom(pkt.Bytes)
 	if err != nil {
-		return serrors.WrapStr("Reliable socket read error", err)
+		return fmt.Errorf("Reliable socket read error", err)
 	}
 
 	pkt.Bytes = pkt.Bytes[:n]
@@ -102,13 +108,17 @@ func (c *TimedSCIONPacketConn) readFrom(pkt *snet.Packet, ov *net.UDPAddr) error
 
 	var ok bool
 	lastHop, ok = lastHopNetAddr.(*net.UDPAddr)
+	// if !ok {
+	// 	return serrors.New("Invalid lastHop address Type",
+	// 		"Actual", lastHopNetAddr)
+	// }
+
 	if !ok {
-		return serrors.New("Invalid lastHop address Type",
-			"Actual", lastHopNetAddr)
+		return fmt.Errorf("invalid lastHop address type: got %T", lastHopNetAddr)
 	}
 
 	if err := pkt.Decode(); err != nil {
-		return serrors.WrapStr("decoding packet", err)
+		return fmt.Errorf("decoding packet", err)
 	}
 
 	if ov != nil {

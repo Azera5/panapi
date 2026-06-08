@@ -14,9 +14,9 @@
 package measured_appnet
 
 import (
-	"github.com/scionproto/scion/go/lib/addr"
-	"github.com/scionproto/scion/go/lib/snet"
-	"github.com/scionproto/scion/go/lib/sock/reliable"
+	"github.com/scionproto/scion/pkg/addr"
+	"github.com/scionproto/scion/pkg/snet"
+	// "github.com/scionproto/scion/go/lib/sock/reliable"
 )
 
 func NewNetwork(ia addr.IA, dispatcher reliable.Dispatcher,

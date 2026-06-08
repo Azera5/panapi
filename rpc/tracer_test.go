@@ -18,7 +18,7 @@ import (
 	"encoding/gob"
 	"testing"
 
-	"github.com/lucas-clemente/quic-go/logging"
+	"github.com/quic-go/quic-go/logging"
 )
 
 func TestTracerMsgEncoding(t *testing.T) {

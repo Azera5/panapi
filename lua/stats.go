@@ -17,7 +17,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/lucas-clemente/quic-go/logging"
+	"github.com/quic-go/quic-go/logging"
 	"github.com/netsec-ethz/scion-apps/pkg/pan"
 	"github.com/netsys-lab/panapi/rpc"
 	lua "github.com/yuin/gopher-lua"
@@ -45,8 +45,8 @@ func new_lua_parameters(p *logging.TransportParameters) *lua.LTable {
 		if a != nil {
 			t.RawSetString("PreferredAddress", lua.LString(
 				fmt.Sprintf(
-					"IPv4: %s:%d, IPv6: %s:%d, ConnectionID: %s, Token: %x",
-					a.IPv4, a.IPv4Port, a.IPv6, a.IPv6Port, a.ConnectionID, a.StatelessResetToken,
+					"IPv4: %s, IPv6: %s, ConnectionID: %s, Token: %x",
+					a.IPv4.String(), a.IPv6.String(), a.ConnectionID, a.StatelessResetToken,
 				),
 			))
 		}
@@ -155,7 +155,7 @@ func (s *Stats) StartedConnection(local, remote *pan.UDPAddr, srcConnID, destCon
 	)
 
 }
-func (s *Stats) NegotiatedVersion(local, remote *pan.UDPAddr, chosen logging.VersionNumber, clientVersions, serverVersions []logging.VersionNumber) error {
+func (s *Stats) NegotiatedVersion(local, remote *pan.UDPAddr, chosen logging.Version, clientVersions, serverVersions []logging.Version) error {
 	//s.Printf("NegotiatedVersion")
 	s.Lock()
 	defer s.Unlock()
@@ -257,7 +257,7 @@ func (s *Stats) SentPacket(local, remote *pan.UDPAddr, hdr *logging.ExtendedHead
 	)
 
 }
-func (s *Stats) ReceivedVersionNegotiationPacket(local, remote *pan.UDPAddr, hdr *logging.Header, versions []logging.VersionNumber) error {
+func (s *Stats) ReceivedVersionNegotiationPacket(local, remote *pan.UDPAddr, hdr *logging.Header, versions []logging.Version) error {
 	//s.Printf("ReceivedVersionNegotiationPacket: only stub implementation")
 	s.Lock()
 	defer s.Unlock()

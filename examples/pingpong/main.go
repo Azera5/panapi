@@ -19,9 +19,9 @@ import (
 	"log"
 	"time"
 
-	"github.com/lucas-clemente/quic-go"
 	"github.com/netsys-lab/panapi/pkg/convenience"
 	"github.com/netsys-lab/panapi/taps"
+	"github.com/quic-go/quic-go"
 
 	iquic "github.com/netsys-lab/panapi/pkg/inet/quic"
 	tcp "github.com/netsys-lab/panapi/pkg/inet/tcp"
@@ -75,9 +75,12 @@ func main() {
 			)
 			if client {
 				selector, config.Tracer, err = convenience.RPCClientHelper()
+				// var tracerFunc func(context.Context, logging.Perspective, logging.ConnectionID) *logging.ConnectionTracer
+				// selector, tracerFunc, err = convenience.RPCClientHelper()
 				if err != nil {
 					log.Println(err)
 				}
+				// config.Tracer = tracerFunc
 			}
 			proto = &squic.Protocol{
 				squic.Config{

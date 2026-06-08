@@ -21,7 +21,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/lucas-clemente/quic-go/logging"
+	"github.com/quic-go/quic-go/logging"
 )
 
 type IDMsg struct {

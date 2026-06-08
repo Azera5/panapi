@@ -18,8 +18,8 @@ import (
 	"encoding/gob"
 	"testing"
 
-	"github.com/lucas-clemente/quic-go/logging"
 	"github.com/netsec-ethz/scion-apps/pkg/pan"
+	"github.com/quic-go/quic-go/logging"
 )
 
 func TestConnectionTracerMsgEncoding(t *testing.T) {
@@ -29,12 +29,12 @@ func TestConnectionTracerMsgEncoding(t *testing.T) {
 		ID:             42,
 		Local:          new(pan.UDPAddr),
 		Remote:         new(pan.UDPAddr),
-		SrcConnID:      new(logging.ConnectionID),
-		DestConnID:     new(logging.ConnectionID),
+		SrcConnID:      []byte{},
+		DestConnID:     []byte{},
 		Chosen:         23,
-		Versions:       []logging.VersionNumber{},
-		ClientVersions: []logging.VersionNumber{},
-		ServerVersions: []logging.VersionNumber{},
+		Versions:       []logging.Version{},
+		ClientVersions: []logging.Version{},
+		ServerVersions: []logging.Version{},
 		ErrorMsg:       new(string),
 		//Parameters:      &logging.TransportParameters{},
 		ByteCount:       1337,

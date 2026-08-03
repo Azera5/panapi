@@ -25,6 +25,187 @@ import (
 	"github.com/quic-go/quic-go/logging"
 )
 
+// The gob serializable structs are necessary to replace the protocol.* types
+type SerializableTransportParameters struct {
+	InitialMaxStreamDataBidiLocal   uint64
+	InitialMaxStreamDataBidiRemote  uint64
+	InitialMaxStreamDataUni         uint64
+	InitialMaxData                  uint64
+	MaxAckDelay                     time.Duration
+	AckDelayExponent                uint8
+	DisableActiveMigration          bool
+	MaxUDPPayloadSize               uint64
+	MaxUniStreamNum                 uint64
+	MaxBidiStreamNum                uint64
+	MaxIdleTimeout                  time.Duration
+	PreferredAddress                string
+	OriginalDestinationConnectionID []byte
+	InitialSourceConnectionID       []byte
+	RetrySourceConnectionID         []byte
+	StatelessResetToken             []byte
+	ActiveConnectionIDLimit         uint64
+	MaxDatagramFrameSize            uint64
+}
+
+func toSerializableTP(p *logging.TransportParameters) *SerializableTransportParameters {
+	if p == nil {
+		return nil
+	}
+	s := &SerializableTransportParameters{
+		InitialMaxStreamDataBidiLocal:  uint64(p.InitialMaxStreamDataBidiLocal),
+		InitialMaxStreamDataBidiRemote: uint64(p.InitialMaxStreamDataBidiRemote),
+		InitialMaxStreamDataUni:        uint64(p.InitialMaxStreamDataUni),
+		InitialMaxData:                 uint64(p.InitialMaxData),
+		MaxAckDelay:                    p.MaxAckDelay,
+		AckDelayExponent:               p.AckDelayExponent,
+		DisableActiveMigration:         p.DisableActiveMigration,
+		MaxUDPPayloadSize:              uint64(p.MaxUDPPayloadSize),
+		MaxUniStreamNum:                uint64(p.MaxUniStreamNum),
+		MaxBidiStreamNum:               uint64(p.MaxBidiStreamNum),
+		MaxIdleTimeout:                 p.MaxIdleTimeout,
+		ActiveConnectionIDLimit:        p.ActiveConnectionIDLimit,
+		MaxDatagramFrameSize:           uint64(p.MaxDatagramFrameSize),
+		// StatelessResetToken:            append([]byte(nil), p.StatelessResetToken...),
+	}
+
+	if p.StatelessResetToken != nil {
+		s.StatelessResetToken = append([]byte(nil), p.StatelessResetToken[:]...)
+	}
+	s.OriginalDestinationConnectionID = p.OriginalDestinationConnectionID.Bytes()
+	s.InitialSourceConnectionID = p.InitialSourceConnectionID.Bytes()
+
+	if p.RetrySourceConnectionID != nil {
+		s.RetrySourceConnectionID = p.RetrySourceConnectionID.Bytes()
+	}
+
+	if p.PreferredAddress != nil {
+		s.PreferredAddress = fmt.Sprintf("IPv4:%s,IPv6:%s,ConnID:%s,Token:%x",
+			p.PreferredAddress.IPv4, p.PreferredAddress.IPv6,
+			p.PreferredAddress.ConnectionID, p.PreferredAddress.StatelessResetToken)
+	}
+	return s
+}
+
+func fromSerializableTP(s *SerializableTransportParameters) *logging.TransportParameters {
+	if s == nil {
+		return nil
+	}
+	p := &logging.TransportParameters{
+		InitialMaxStreamDataBidiLocal:  logging.ByteCount(s.InitialMaxStreamDataBidiLocal),
+		InitialMaxStreamDataBidiRemote: logging.ByteCount(s.InitialMaxStreamDataBidiRemote),
+		InitialMaxStreamDataUni:        logging.ByteCount(s.InitialMaxStreamDataUni),
+		InitialMaxData:                 logging.ByteCount(s.InitialMaxData),
+		MaxAckDelay:                    s.MaxAckDelay,
+		AckDelayExponent:               s.AckDelayExponent,
+		DisableActiveMigration:         s.DisableActiveMigration,
+		MaxUDPPayloadSize:             	logging.ByteCount(s.MaxUDPPayloadSize),
+		MaxUniStreamNum: 				logging.StreamNum(s.MaxUniStreamNum),
+		MaxBidiStreamNum:              	logging.StreamNum(s.MaxBidiStreamNum),
+		MaxIdleTimeout:                 s.MaxIdleTimeout,
+		ActiveConnectionIDLimit:        s.ActiveConnectionIDLimit,
+		MaxDatagramFrameSize:           logging.ByteCount(s.MaxDatagramFrameSize),
+		// StatelessResetToken:            append([]byte(nil), s.StatelessResetToken...),
+	}
+
+	if len(s.OriginalDestinationConnectionID) > 0 {
+		id := bytesToConnID(s.OriginalDestinationConnectionID)
+		p.OriginalDestinationConnectionID = id
+	}
+	if len(s.InitialSourceConnectionID) > 0 {
+		id := bytesToConnID(s.InitialSourceConnectionID)
+		p.InitialSourceConnectionID = id
+	}
+	if len(s.RetrySourceConnectionID) > 0 {
+		id := bytesToConnID(s.RetrySourceConnectionID)
+		p.RetrySourceConnectionID = &id
+	}
+	return p
+}
+
+type SerializableHeader struct {
+	Type             uint8
+	Version          logging.Version
+	SrcConnectionID  []byte
+	DestConnectionID []byte
+	Length           logging.ByteCount
+	Token            []byte
+}
+
+func toSerializableHeader(h *logging.Header) *SerializableHeader {
+	if h == nil {
+		return nil
+	}
+	return &SerializableHeader{
+		Type:             uint8(h.Type),
+		Version:          h.Version,
+		SrcConnectionID:  h.SrcConnectionID.Bytes(),
+		DestConnectionID: h.DestConnectionID.Bytes(),
+		Length:           h.Length,
+		Token:            append([]byte(nil), h.Token...),
+	}
+}
+
+func fromSerializableHeader(s *SerializableHeader) *logging.Header {
+	if s == nil {
+		return nil
+	}
+
+	return &logging.Header{
+		Version:          s.Version,
+		SrcConnectionID:  bytesToConnID(s.SrcConnectionID),
+		DestConnectionID: bytesToConnID(s.DestConnectionID),
+		Length:           s.Length,
+		Token:            append([]byte(nil), s.Token...),
+	}
+}
+
+type SerializableExtendedHeader struct {
+	Type             uint8
+	Version          logging.Version
+	SrcConnectionID  []byte
+	DestConnectionID []byte
+	Length           logging.ByteCount
+	Token            []byte
+	PacketNumber     logging.PacketNumber
+	PacketNumberLen  uint8
+	KeyPhase         logging.KeyPhaseBit
+}
+
+func toSerializableExtendedHeader(h *logging.ExtendedHeader) *SerializableExtendedHeader {
+	if h == nil {
+		return nil
+	}
+	return &SerializableExtendedHeader{
+		Type:             uint8(h.Type),
+		Version:          h.Version,
+		SrcConnectionID:  h.SrcConnectionID.Bytes(),
+		DestConnectionID: h.DestConnectionID.Bytes(),
+		Length:           h.Length,
+		Token:            append([]byte(nil), h.Token...),
+		PacketNumber:     h.PacketNumber,
+		PacketNumberLen:  uint8(h.PacketNumberLen),
+		KeyPhase:         h.KeyPhase,
+	}
+}
+
+func fromSerializableExtendedHeader(s *SerializableExtendedHeader) *logging.ExtendedHeader {
+	if s == nil {
+		return nil
+	}
+	h:= &logging.ExtendedHeader{
+		Header: logging.Header{
+			Version:          s.Version,
+			SrcConnectionID:  bytesToConnID(s.SrcConnectionID),
+			DestConnectionID: bytesToConnID(s.DestConnectionID),
+			Length:           s.Length,
+			Token:            append([]byte(nil), s.Token...),
+		},
+		PacketNumber:    s.PacketNumber,
+		KeyPhase:        s.KeyPhase,
+	}
+	return h
+}
+
 type ServerConnectionTracer interface {
 	TracerForConnection(id uint64, p logging.Perspective, odcid logging.ConnectionID) error
 	StartedConnection(local, remote *pan.UDPAddr, srcConnID, destConnID logging.ConnectionID) error
@@ -76,11 +257,11 @@ type ConnectionTracerMsg struct {
 	Chosen                                   logging.Version
 	Versions, ClientVersions, ServerVersions []logging.Version
 	ErrorMsg, Key, Value                     *string
-	Parameters                               *logging.TransportParameters
+	Parameters                               *SerializableTransportParameters
 	ByteCount, Cwnd                          logging.ByteCount
 	Packets, ID                              int
-	Header                                   *logging.Header
-	ExtendedHeader                           *logging.ExtendedHeader
+	Header                                   *SerializableHeader
+	ExtendedHeader                           *SerializableExtendedHeader
 	Frames                                   []logging.Frame
 	AckFrame                                 *logging.AckFrame
 	PacketType                               logging.PacketType
@@ -208,7 +389,11 @@ func NewConnectionTracerClient(client *Client, id uint64, p logging.Perspective,
 func (c *ConnectionTracerClient) StartedConnection(local, remote net.Addr, srcConnID, destConnID logging.ConnectionID) {
 	//c.l.Printf("StartedConnection")
 	msg := c.new_msg()
-	l := local.(pan.UDPAddr)
+	l, ok := local.(pan.UDPAddr)
+	if !ok {
+		c.l.Printf("unexpected local type %T", local)
+		return
+	}
 	r := remote.(pan.UDPAddr)
 	c.local = &l
 	c.remote = &r
@@ -257,7 +442,7 @@ func (c *ConnectionTracerClient) ClosedConnection(e error) {
 func (c *ConnectionTracerClient) SentTransportParameters(parameters *logging.TransportParameters) {
 	//c.l.Printf("SentTransportParameters")
 	msg := c.new_msg()
-	msg.Parameters = parameters
+	msg.Parameters = toSerializableTP(parameters)
 	err := c.rpc.Call("ConnectionTracerServer.SentTransportParameters",
 		msg,
 		&NilMsg{},
@@ -269,7 +454,7 @@ func (c *ConnectionTracerClient) SentTransportParameters(parameters *logging.Tra
 func (c *ConnectionTracerClient) ReceivedTransportParameters(parameters *logging.TransportParameters) {
 	//c.l.Printf("ReceivedTransportParameters")
 	msg := c.new_msg()
-	msg.Parameters = parameters
+	msg.Parameters = toSerializableTP(parameters)
 	err := c.rpc.Call("ConnectionTracerServer.ReceivedTransportParameters",
 		msg,
 		&NilMsg{},
@@ -281,7 +466,7 @@ func (c *ConnectionTracerClient) ReceivedTransportParameters(parameters *logging
 func (c *ConnectionTracerClient) RestoredTransportParameters(parameters *logging.TransportParameters) {
 	//c.l.Printf("RestoredTransportParameters")
 	msg := c.new_msg()
-	msg.Parameters = parameters
+	msg.Parameters = toSerializableTP(parameters)
 	err := c.rpc.Call("ConnectionTracerServer.RestoredTransportParameters",
 		msg,
 		&NilMsg{},
@@ -293,7 +478,7 @@ func (c *ConnectionTracerClient) RestoredTransportParameters(parameters *logging
 func (c *ConnectionTracerClient) SentLongHeaderPacket(hdr *logging.ExtendedHeader, size logging.ByteCount, ecn logging.ECN, ack *logging.AckFrame, frames []logging.Frame) {
 	//c.l.Printf("SentPacket")
 	msg := c.new_msg()
-	msg.ExtendedHeader = hdr
+	msg.ExtendedHeader = toSerializableExtendedHeader(hdr)
 	msg.ByteCount = size
 	msg.AckFrame = ack
 	//msg.Frames = frames
@@ -321,7 +506,7 @@ func (c *ConnectionTracerClient) ReceivedVersionNegotiationPacket(dest, src logg
 func (c *ConnectionTracerClient) ReceivedRetry(hdr *logging.Header) {
 	//c.l.Printf("ReceivedRetry")
 	msg := c.new_msg()
-	msg.Header = hdr
+	msg.Header = toSerializableHeader(hdr)
 	err := c.rpc.Call("ConnectionTracerServer.ReceivedRetry",
 		msg,
 		&NilMsg{},
@@ -333,7 +518,7 @@ func (c *ConnectionTracerClient) ReceivedRetry(hdr *logging.Header) {
 func (c *ConnectionTracerClient) ReceivedLongHeaderPacket(hdr *logging.ExtendedHeader, size logging.ByteCount, ecn logging.ECN, frames []logging.Frame) {
 	//c.l.Printf("ReceivedPacket")
 	msg := c.new_msg()
-	msg.ExtendedHeader = hdr
+	msg.ExtendedHeader = toSerializableExtendedHeader(hdr)
 	msg.ByteCount = size
 	//msg.Frames = frames
 	err := c.rpc.Call("ConnectionTracerServer.ReceivedPacket",
@@ -571,7 +756,7 @@ func (c *ConnectionTracerServer) NewTracerForConnection(args *ConnectionTracerMs
 
 func (c *ConnectionTracerServer) StartedConnection(args *ConnectionTracerMsg, resp *NilMsg) error {
 	//c.l.Printf("StartedConnection called: %+v", args)
-	if args.Local == nil || args.Remote == nil || args.SrcConnID == nil || args.DestConnID == nil {
+	if args.Local == nil || args.Remote == nil {
 		return ErrDeref
 	}
 	return c.ct.StartedConnection(args.Local, args.Remote, bytesToConnID(args.SrcConnID), bytesToConnID(args.DestConnID))
@@ -593,37 +778,37 @@ func (c *ConnectionTracerServer) ClosedConnection(args *ConnectionTracerMsg, res
 
 func (c *ConnectionTracerServer) SentTransportParameters(args *ConnectionTracerMsg, resp *NilMsg) error {
 	//c.l.Println("SentTransportParameters called")
-	return c.ct.SentTransportParameters(args.Local, args.Remote, args.Parameters)
+	return c.ct.SentTransportParameters(args.Local, args.Remote, fromSerializableTP(args.Parameters))
 }
 
 func (c *ConnectionTracerServer) ReceivedTransportParameters(args *ConnectionTracerMsg, resp *NilMsg) error {
 	//c.l.Println("ReceivedTransportParameters called")
-	return c.ct.ReceivedTransportParameters(args.Local, args.Remote, args.Parameters)
+	return c.ct.ReceivedTransportParameters(args.Local, args.Remote, fromSerializableTP(args.Parameters))
 }
 
 func (c *ConnectionTracerServer) RestoredTransportParameters(args *ConnectionTracerMsg, resp *NilMsg) error {
 	//c.l.Println("RestoredTransportParameters called")
-	return c.ct.RestoredTransportParameters(args.Local, args.Remote, args.Parameters)
+	return c.ct.RestoredTransportParameters(args.Local, args.Remote, fromSerializableTP(args.Parameters))
 }
 
 func (c *ConnectionTracerServer) SentPacket(args *ConnectionTracerMsg, resp *NilMsg) error {
 	//c.l.Println("SentPacket called")
-	return c.ct.SentPacket(args.Local, args.Remote, args.ExtendedHeader, args.ByteCount, args.AckFrame, args.Frames)
+	return c.ct.SentPacket(args.Local, args.Remote, fromSerializableExtendedHeader(args.ExtendedHeader), args.ByteCount, args.AckFrame, nil)
 }
 
 func (c *ConnectionTracerServer) ReceivedVersionNegotiationPacket(args *ConnectionTracerMsg, resp *NilMsg) error {
 	//c.l.Println("ReceivedVersionNegotiationPacket called")
-	return c.ct.ReceivedVersionNegotiationPacket(args.Local, args.Remote, args.Header, args.Versions)
+	return c.ct.ReceivedVersionNegotiationPacket(args.Local, args.Remote, fromSerializableHeader(args.Header), args.Versions)
 }
 
 func (c *ConnectionTracerServer) ReceivedRetry(args *ConnectionTracerMsg, resp *NilMsg) error {
 	//c.l.Println("ReceivedRetry called")
-	return c.ct.ReceivedRetry(args.Local, args.Remote, args.Header)
+	return c.ct.ReceivedRetry(args.Local, args.Remote, fromSerializableHeader(args.Header))
 }
 
 func (c *ConnectionTracerServer) ReceivedPacket(args *ConnectionTracerMsg, resp *NilMsg) error {
 	//c.l.Println("ReceivedPacket called")
-	return c.ct.ReceivedPacket(args.Local, args.Remote, args.ExtendedHeader, args.ByteCount, args.Frames)
+	return c.ct.ReceivedPacket(args.Local, args.Remote, fromSerializableExtendedHeader(args.ExtendedHeader), args.ByteCount, nil)
 }
 
 func (c *ConnectionTracerServer) BufferedPacket(args *ConnectionTracerMsg, resp *NilMsg) error {
@@ -713,7 +898,11 @@ func (c *ConnectionTracerServer) Debug(args *ConnectionTracerMsg, resp *NilMsg) 
 }
 
 func connIDToBytes(id logging.ConnectionID) []byte {
-	return id.Bytes()
+    b := id.Bytes()
+    if b == nil {
+        return []byte{}
+    }
+    return b
 }
 
 func bytesToConnID(b []byte) logging.ConnectionID {

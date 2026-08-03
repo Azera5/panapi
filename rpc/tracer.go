@@ -30,6 +30,8 @@ type tracerClient struct {
 	l   *log.Logger
 }
 
+type SerializableConnectionID []byte
+
 func NewTracerClient(client *Client) logging.Tracer {
 	c := &tracerClient{client, client.l}
 
@@ -41,7 +43,7 @@ func NewTracerClient(client *Client) logging.Tracer {
 				&TracerMsg{
 					ID:        &c.rpc.id,
 					Addr:      addr,
-					Header:    hdr,
+					Header:    toSerializableHeader(hdr),
 					ByteCount: &n,
 					Frames:    fs,
 				},
@@ -86,9 +88,9 @@ type TracerMsg struct {
 	ID           *int
 	TracingID    *uint64
 	Perspective  *logging.Perspective
-	ConnectionID *logging.ConnectionID
+	ConnectionID SerializableConnectionID
 	Addr         net.Addr
-	Header       *logging.Header
+	Header       *SerializableHeader
 	ByteCount    *logging.ByteCount
 	Frames       []logging.Frame
 	PacketType   *logging.PacketType
@@ -131,7 +133,7 @@ func (s *TracerServer) SentPacket(args, resp *TracerMsg) error {
 	if args.Addr != nil && args.ByteCount != nil {
 		s.l.Printf("SentPacket %+v %+v %+v %+v", args.Addr, args.Header, *args.ByteCount, args.Frames)
 		if s.tracer.SentPacket != nil {
-			s.tracer.SentPacket(args.Addr, args.Header, *args.ByteCount, args.Frames)
+			s.tracer.SentPacket(args.Addr, fromSerializableHeader(args.Header), *args.ByteCount, nil)
 		}
 	} else {
 		return ErrDeref

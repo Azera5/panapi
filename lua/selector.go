@@ -115,6 +115,14 @@ func lua_table_slice_to_table(s []*lua.LTable) *lua.LTable {
 	return &res
 }
 
+func newLuaFingerprintTable(fps []pan.PathFingerprint) *lua.LTable {
+	t := lua.LTable{}
+	for _, fp := range fps {
+		t.Append(lua.LString(fp))
+	}
+	return &t
+}
+
 // help to translate lua to pan pointers back and forth
 type state struct {
 	lpaths map[string]map[string]*lua.LTable
@@ -329,6 +337,35 @@ func (s *LuaSelector) Refresh(local, remote pan.UDPAddr, paths []*pan.Path) erro
 		lua.LString(remote.String()),
 		lua_table_slice_to_table(lpaths),
 	)
+}
+
+func (s *LuaSelector) SelectActivePath(remote pan.UDPAddr, current []pan.PathFingerprint) (pan.PathFingerprint, error) {
+	s.Lock()
+	defer s.Unlock()
+
+	fn := s.mod.RawGetString("SelectActivePath")
+	if fn.Type() != lua.LTFunction {
+		return "", nil
+	}
+
+	// Expect one return value from the Lua script:
+	// the fingerprint to switch to, or nil/"" to keep the current connection
+	err := s.CallByParam(
+		lua.P{
+			Protect: true,
+			Fn:      fn,
+			NRet:    1,
+		},
+		lua.LString(remote.String()),
+		newLuaFingerprintTable(current),
+	)
+	if err != nil {
+		return "", err
+	}
+
+	chosen := s.ToString(-1)
+	s.Pop(1)
+	return pan.PathFingerprint(chosen), nil
 }
 
 func (s *LuaSelector) Close(local, remote pan.UDPAddr) error {

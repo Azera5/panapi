@@ -102,3 +102,14 @@ func (c *Client) Call(serviceMethod string, args interface{}, reply interface{})
 func (c *Client) Close() error {
 	return c.client.Close()
 }
+
+func (c *Client) CallAsync(serviceMethod string, args interface{}) {
+	c.l.Printf("RPC: %s called (async)", serviceMethod)
+	call := c.client.Go(serviceMethod, args, &NilMsg{}, make(chan *rpc.Call, 1))
+	go func() {
+		res := <-call.Done
+		if res.Error != nil {
+			c.l.Println(serviceMethod, ":", res.Error)
+		}
+	}()
+}

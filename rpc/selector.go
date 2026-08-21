@@ -38,6 +38,9 @@ type ServerSelector interface {
 	PathDown(pan.UDPAddr, pan.UDPAddr, pan.PathFingerprint, pan.PathInterface) error
 	Refresh(pan.UDPAddr, pan.UDPAddr, []*pan.Path) error
 	Close(pan.UDPAddr, pan.UDPAddr) error
+
+	// Polled periodically to select the active path from the pinned connections
+	SelectActivePath(remote pan.UDPAddr, current []pan.PathFingerprint) (pan.PathFingerprint, error)
 }
 
 type serverSelector struct {
@@ -88,10 +91,15 @@ func (s serverSelector) Close(local, remote pan.UDPAddr) error {
 	return err
 }
 
+func (s serverSelector) SelectActivePath(remote pan.UDPAddr, current []pan.PathFingerprint) (pan.PathFingerprint, error) {
+	return "", nil
+}
+
 type SelectorMsg struct {
 	Local         *pan.UDPAddr
 	Remote        *pan.UDPAddr
 	Fingerprint   *pan.PathFingerprint
+	Fingerprints  []pan.PathFingerprint
 	PathInterface *pan.PathInterface
 	Preferences   *taps.ConnectionPreferences
 	Paths         []*Path
@@ -177,6 +185,20 @@ func (s *SelectorServer) Close(args, resp *SelectorMsg) error {
 		return ErrDeref
 	}
 	return s.selector.Close(*args.Local, *args.Remote)
+}
+
+func (s *SelectorServer) SelectActivePath(args, resp *SelectorMsg) error {
+	if args.Remote == nil {
+		return ErrDeref
+	}
+	fp, err := s.selector.SelectActivePath(*args.Remote, args.Fingerprints)
+	if err != nil {
+		return err
+	}
+	if fp != "" {
+		resp.Fingerprint = &fp
+	}
+	return nil
 }
 
 type SelectorClient struct {
@@ -288,4 +310,34 @@ func (s *SelectorClient) Close() error {
 		return err
 	}
 	return s.client.client.Close()
+}
+
+// Returns the shared RPC connection used by path-specific SelectorClients
+func (s *SelectorClient) RPCClient() *Client {
+	return s.client
+}
+
+// Notifies the daemon that this selector state can be discarded without closing the shared RPC connection
+func (s *SelectorClient) NotifyClosed() error {
+	if s.local == nil || s.remote == nil {
+		return nil
+	}
+	s.l.Println("NotifyClosed called")
+	return s.client.Call("SelectorServer.Close", &SelectorMsg{Local: s.local, Remote: s.remote}, &SelectorMsg{})
+}
+
+// Requests the selector to choose the active path for the remote connection
+func (c *Client) SelectActivePath(remote pan.UDPAddr, current []pan.PathFingerprint) (pan.PathFingerprint, error) {
+	resp := SelectorMsg{}
+	err := c.Call("SelectorServer.SelectActivePath", &SelectorMsg{
+		Remote:       &remote,
+		Fingerprints: current,
+	}, &resp)
+	if err != nil {
+		return "", err
+	}
+	if resp.Fingerprint != nil {
+		return *resp.Fingerprint, nil
+	}
+	return "", nil
 }

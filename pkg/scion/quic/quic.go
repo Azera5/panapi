@@ -53,6 +53,11 @@ type Config struct {
 	Quic     *quic.Config
 	TLS      *tls.Config
 	Selector taps.Selector
+
+	// Enables multiple independent, path-pinned QUIC connections when set above 1
+	// Needed for path-specific QUIC stats
+	// 0 or 1 keeps the existing single-connection behavior unchanged
+	MaxPathConnections int
 }
 
 type Protocol struct {
@@ -133,6 +138,10 @@ func (q *Protocol) NewListener(p *taps.Preconnection) (taps.Listener, error) {
 // }
 
 func (q *Protocol) Initiate(p *taps.Preconnection) (taps.Connection, error) {
+	if q.Config.MaxPathConnections > 1 {
+		return q.initiateMultipath(p)
+	}
+
 	addr, err := pan.ResolveUDPAddr(context.Background(), p.RemoteEndpoint.Address)
 	if err != nil {
 		return nil, err

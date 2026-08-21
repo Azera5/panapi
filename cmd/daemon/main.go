@@ -14,9 +14,7 @@
 package main
 
 import (
-	"context"
 	"flag"
-	"fmt"
 	"log"
 	"net"
 	"os"
@@ -30,7 +28,6 @@ import (
 	"github.com/netsys-lab/panapi/rpc"
 	"github.com/netsys-lab/panapi/taps"
 	"github.com/quic-go/quic-go/logging"
-	"github.com/quic-go/quic-go/qlog"
 )
 
 func main() {
@@ -79,19 +76,7 @@ func main() {
 		})
 	}
 
-	tracer := &logging.Tracer{}
-	_ = tracer
-	connTracerFunc := func(ctx context.Context, p logging.Perspective, connID logging.ConnectionID) *logging.ConnectionTracer {
-		fname := fmt.Sprintf("/tmp/quic-tracer-%d-%x.qlog", p, connID)
-		log.Println("quic tracer file opened as", fname)
-		f, err := os.Create(fname)
-		if err != nil {
-			panic(err)
-		}
-		return qlog.NewConnectionTracer(f, p, connID)
-	}
-	_ = connTracerFunc
-	server, err := rpc.NewServer(selector, *tracer, stats)
+	server, err := rpc.NewServer(selector, logging.Tracer{}, stats)
 	if err != nil {
 		log.Fatalln(err)
 	}

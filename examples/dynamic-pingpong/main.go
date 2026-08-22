@@ -615,14 +615,14 @@ func main() {
 
 				if itrcounter >= opts.MaxIterations {
 					printf("\n\n <CLIENT> finished!\n\n          reason: %d iterations run, goal: %d\n\n          total time:%fs", itrcounter, opts.MaxIterations, time.Since(startClient).Seconds())
-					// give to other host atleast one full interval to finish
+					// give the other host atleast one full interval to finish
 					time.Sleep(time.Duration(halfIntervalTime*2) * time.Second)
 					conn.Close()
 					os.Exit(0)
 				}
 				if totalSent >= opts.Bytes {
 					printf("\n\n <CLIENT> finished!\n\n          reason: %d bytes sent, goal: %d\n\n          total time:%fs", totalSent, opts.Bytes, time.Since(startClient).Seconds())
-					// give to other host atleast one full interval to finish; not effective when '-r' was chosen (the other side always waits)
+					// give the other host atleast one full interval to finish; not effective when '-r' was chosen (the other side always waits)
 					time.Sleep(time.Duration(halfIntervalTime*2) * time.Second)
 					conn.Close()
 					os.Exit(0)

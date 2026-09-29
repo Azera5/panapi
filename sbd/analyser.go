@@ -1,7 +1,6 @@
 package sbd
 
 import (
-	"fmt"
 	"sync"
 	"time"
 
@@ -191,13 +190,11 @@ func (a *SBDAnalyser) bottleneckInterfacesLocked() []InterfaceID {
 	now := time.Now()
 	var out []InterfaceID
 	for iface, last := range a.lastDetected {
-		fmt.Println(iface.IfID)
 		// drop the interface if the detection is to old
 		if now.Sub(last) > a.cfg.ClearanceDelay {
 			delete(a.lastDetected, iface)
 			continue
 		}
-		fmt.Println(iface.IfID)
 		out = append(out, iface)
 	}
 	return out

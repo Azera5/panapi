@@ -23,6 +23,13 @@ const activePathPollInterval = 1 * time.Second
 // Defines how many consecutive duplicates cause the grow pool process to stop
 const maxConsecutiveDuplicateDials = 3
 
+// New read/write operations that allow applications to bind a read/write pair to the same pinned connection
+type BoundReadWriter interface {
+	ReadBound(id any, p []byte) (int, error)
+	WriteBound(id any, p []byte) (int, error)
+	RemoveBound(id any)
+}
+
 // A path-specific QUIC connection inside a MultiConnection's pool
 type pinnedConn struct {
 	conn      *quic.Conn
@@ -39,10 +46,11 @@ type MultiConnection struct {
 	remote    pan.UDPAddr
 	rpcClient *rpc.Client // shared RPC connection, used to poll SelectActivePath
 
-	mu     sync.Mutex
-	conns  []*pinnedConn
-	closed bool
-	active *pinnedConn
+	mu       sync.Mutex
+	conns    []*pinnedConn
+	closed   bool
+	active   *pinnedConn
+	bindings map[any]*pinnedConn // needed for BoundReadWriter
 
 	done chan struct{}  // closed by Close() to stop pollActivePath
 	wg   sync.WaitGroup // Tracks growPool/pollActivePath so Close can wait for them to fully exit before returning
@@ -52,6 +60,8 @@ func (mc *MultiConnection) Preconnection() *taps.Preconnection {
 	return mc.p
 }
 
+// Not fully transparent to the application. May cause a deadlock when called from the wrong pinned connection
+// Workaround: bound read/write
 func (mc *MultiConnection) Write(p []byte) (int, error) {
 	mc.mu.Lock()
 	if mc.closed {
@@ -63,6 +73,14 @@ func (mc *MultiConnection) Write(p []byte) (int, error) {
 
 	if c == nil {
 		return 0, errors.New("quic: MultiConnection has no pinned connections")
+	}
+	return c.stream.Write(p)
+}
+
+func (mc *MultiConnection) WriteBound(id any, p []byte) (int, error) {
+	c, err := mc.bind(id)
+	if err != nil {
+		return 0, err
 	}
 	return c.stream.Write(p)
 }
@@ -83,6 +101,8 @@ func (mc *MultiConnection) pickActiveLocked() *pinnedConn {
 	return mc.active
 }
 
+// Not fully transparent to the application. May cause a deadlock when called from the wrong pinned connection
+// Workaround: bound read/write
 func (mc *MultiConnection) Read(p []byte) (int, error) {
 	mc.mu.Lock()
 	active := mc.active
@@ -92,6 +112,14 @@ func (mc *MultiConnection) Read(p []byte) (int, error) {
 		return 0, errors.New("quic: MultiConnection: Read called before any Write")
 	}
 	return active.stream.Read(p)
+}
+
+func (mc *MultiConnection) ReadBound(id any, p []byte) (int, error) {
+	c, err := mc.bind(id)
+	if err != nil {
+		return 0, err
+	}
+	return c.stream.Read(p)
 }
 
 func (mc *MultiConnection) Close() error {
@@ -136,6 +164,7 @@ func (q *Protocol) initiateMultipath(p *taps.Preconnection) (taps.Connection, er
 		remote:    addr,
 		rpcClient: sc.RPCClient(),
 		done:      make(chan struct{}),
+		bindings:  make(map[any]*pinnedConn),
 	}
 
 	first, err := mc.dialOne(context.Background())
@@ -310,4 +339,25 @@ func discardDial(c *pinnedConn) error {
 		c.selClient.NotifyClosed()
 	}
 	return c.conn.CloseWithError(0, "closed")
+}
+
+// Binds the id to the current connection and reuses this connection for all subsequent calls with this id
+func (mc *MultiConnection) bind(id any) (*pinnedConn, error) {
+	mc.mu.Lock()
+	defer mc.mu.Unlock()
+	if c, ok := mc.bindings[id]; ok {
+		return c, nil
+	}
+	c := mc.pickActiveLocked()
+	if c == nil {
+		return nil, errors.New("quic: no pinned connections available")
+	}
+	mc.bindings[id] = c
+	return c, nil
+}
+
+func (mc *MultiConnection) RemoveBound(id any) {
+	mc.mu.Lock()
+	delete(mc.bindings, id)
+	mc.mu.Unlock()
 }

@@ -20,12 +20,14 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"runtime/pprof"
 
 	"github.com/netsec-ethz/scion-apps/pkg/pan"
 	"github.com/netsys-lab/panapi/lua"
 	"github.com/netsys-lab/panapi/rpc"
+	"github.com/netsys-lab/panapi/sbd"
 	"github.com/netsys-lab/panapi/taps"
 	"github.com/quic-go/quic-go/logging"
 )
@@ -36,10 +38,23 @@ func main() {
 		cpulog   string
 		selector rpc.ServerSelector
 		err      error
+
+		sbdLossEpsilon    float64
+		sbdMinLoss        float64
+		sbdThroughputPct  float64
+		sbdWindowSize     int
+		sbdClearanceDelay time.Duration
 	)
 
 	flag.StringVar(&script, "script", "", "Lua script for path selection")
 	flag.StringVar(&cpulog, "cpulog", "", "Write profiling information to file")
+
+	// Shared Bottleneck Detection (SBD)
+	flag.Float64Var(&sbdLossEpsilon, "sbd-loss-epsilon", 15, "SBD: max absolute loss difference (%) for similarity")
+	flag.Float64Var(&sbdMinLoss, "sbd-min-loss", 2, "SBD: minimum loss (%) before a path is considered degraded")
+	flag.Float64Var(&sbdThroughputPct, "sbd-throughput-pct", 20, "SBD: max relative throughput difference (%) for similarity")
+	flag.IntVar(&sbdWindowSize, "sbd-window-size", 8, "SBD: number of recent observations to buffer across all paths")
+	flag.DurationVar(&sbdClearanceDelay, "sbd-clearance-delay", 2*time.Second, "SBD: delay before removing a cleared bottleneck")
 	flag.Parse()
 
 	c := make(chan os.Signal, 1)
@@ -67,6 +82,16 @@ func main() {
 	lua_state := lua.NewState()
 	selector = lua.NewSelector(lua_state)
 	stats := lua.NewStats(lua_state)
+
+	// NewSBDBridge has to run after NewSelector: it adds its functions to the existing "panapi" module created by NewSelector
+	sbdBridge := lua.NewSBDBridge(lua_state, sbd.Config{
+		LossEpsilon:    sbdLossEpsilon,
+		MinLoss:        sbdMinLoss,
+		ThroughputPct:  sbdThroughputPct,
+		WindowSize:     sbdWindowSize,
+		ClearanceDelay: sbdClearanceDelay,
+	})
+
 	err = lua_state.LoadScript(script)
 	if err != nil {
 		log.Printf("Could not load path-selection script: %s", err)
@@ -75,6 +100,9 @@ func main() {
 			return &taps.DefaultSelector{}
 		})
 	}
+
+	stats = sbdBridge.WrapStats(stats)
+	selector = sbdBridge.WrapSelector(selector)
 
 	server, err := rpc.NewServer(selector, logging.Tracer{}, stats)
 	if err != nil {

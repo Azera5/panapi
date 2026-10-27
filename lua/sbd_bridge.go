@@ -249,13 +249,27 @@ func (b *SBDBridge) flushLoop() {
 	}
 }
 
-// Finalises and forwards path metrics to the analyser if there was at least one packet loss
+// Finalises and forwards (active) path metrics to the analyser
 func (b *SBDBridge) flushOnce() {
 	b.mu.Lock()
 	var observations []sbd.PathObservation
+	
+	type losslessPath struct {
+		id         pan.PathFingerprint
+		interfaces []sbd.InterfaceID
+	}
+	var losslessPaths []losslessPath
+
 	for _, c := range b.pathMetrics {
 		justFlushed := c.updateTickSample()
-		if justFlushed.lost == 0 || c.pathID == "" {
+		if c.pathID == "" {
+			continue
+		}
+		if justFlushed.lost == 0 {
+			// we take ACKs as an indicator for some network activity, otherwise a zero loss is meaningless
+			if justFlushed.acked > 0 {
+				losslessPaths = append(losslessPaths, losslessPath{c.pathID, c.interfaces})
+			}
 			continue
 		}
 		observations = append(observations, sbd.PathObservation{
@@ -268,6 +282,11 @@ func (b *SBDBridge) flushOnce() {
 		})
 	}
 	b.mu.Unlock()
+
+	now := time.Now()
+	for _, p := range losslessPaths {
+		b.analyser.TouchLosslessPath(p.id, p.interfaces, now)
+	}
 
 	// Runs outside b.mu: Observe locks the analyser itself
 	for _, obs := range observations {

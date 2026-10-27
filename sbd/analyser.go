@@ -15,6 +15,11 @@ type InterfaceID struct {
 	IfID uint64
 }
 
+type losslessPath struct {
+	interfaces []InterfaceID
+	at         time.Time
+}
+
 // recently measured metrics for a single path
 type PathObservation struct {
 
@@ -76,14 +81,16 @@ func (cfg Config) withDefaults() Config {
 type SBDAnalyser struct {
 	cfg Config
 
-	mu           sync.Mutex
-	window       []PathObservation
-	lastDetected map[InterfaceID]time.Time
+	mu           	sync.Mutex
+	window       	[]PathObservation
+	lastDetected 	map[InterfaceID]time.Time
+	losslessPaths	map[pan.PathFingerprint]losslessPath
 }
 func NewSBDAnalyser(cfg Config) *SBDAnalyser {
 	return &SBDAnalyser{
-		cfg:          cfg.withDefaults(),
-		lastDetected: make(map[InterfaceID]time.Time),
+		cfg:          	cfg.withDefaults(),
+		lastDetected: 	make(map[InterfaceID]time.Time),
+		losslessPaths:  make(map[pan.PathFingerprint]losslessPath),
 	}
 }
 
@@ -99,6 +106,7 @@ func (a *SBDAnalyser) Observe(obs PathObservation) []InterfaceID {
 	if len(a.window) > a.cfg.WindowSize {
 		a.window = a.window[1:]
 	}
+	delete(a.losslessPaths, obs.PathID)
 
 	affected := make(map[pan.PathFingerprint]bool)
 	for i := 0; i < len(a.window); i++ {
@@ -167,6 +175,23 @@ func (a *SBDAnalyser) currentPathsLocked(affected map[pan.PathFingerprint]bool) 
 		paths = append(paths, obs.PathInterfaces) 
 	}
 	
+	// besides our loss observations we also have to consider lossless active paths within the relevant timeframe
+	// we need this information for the subtraction-/correction-step in the bottleneck detection alg
+	now := time.Now()
+	for id, s := range a.losslessPaths {
+		// information too dated
+		if now.Sub(s.at) > a.cfg.ClearanceDelay {
+			delete(a.losslessPaths, id)
+			continue
+		}
+		// already known
+		if _, ok := index[id]; ok {
+			continue 
+		}
+		index[id] = len(paths)
+		paths = append(paths, s.interfaces)
+	}
+	
 	// second part: building affectedIndx <=> converting the suspicious path list to relevant indicies regarding paths from the first part
 	for pathID := range affected {
 		if idx, ok := index[pathID]; ok {
@@ -227,3 +252,10 @@ func isWithinRelativePercent(a, b, pct float64) bool {
 }
 
 
+
+// reports a lossless but active path during the last tick
+func (a *SBDAnalyser) TouchLosslessPath(id pan.PathFingerprint, interfaces []InterfaceID, at time.Time) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.losslessPaths[id] = losslessPath{interfaces: interfaces, at: at}
+}

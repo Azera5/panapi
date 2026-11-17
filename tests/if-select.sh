@@ -165,9 +165,7 @@ render() {
     local i iface pctifpl pctifbr marker
     
     printf '\e[H\e[2J'
-
-    #printf '  \e[1m%s %17s %17s %17s \n' " " " " "packet loss" "bw. reduction"
-    
+  
     #header
     printf '  %s %-17s ' " " " " 
     for j in $(seq 0 $numvalidmodes); do

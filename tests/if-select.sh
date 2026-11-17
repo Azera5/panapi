@@ -149,22 +149,6 @@ apply() {
     done
 }
 
-#does not work as intend
-activesleep() {
-    local passedtime=0
-    while true; do
-        sleep 1
-        passedtime=$(( passedtime + 1 ))
-        if [ $passedtime -ge $interval ]; then
-            if read -t 0 -r; then
-                read -r
-                break
-            fi
-        fi
-    done
-}
-
-
 # drawing
 draw_bar() {
     local pct=$1 cur=$2 width=20 filled i bar=""

@@ -2,6 +2,7 @@
 
 SCRIPT_LOCATION=$(realpath "$0")
 WORK_LOCATION=$(dirname "$SCRIPT_LOCATION")
+HOSTNAME=$(hostname)
 
 throw_err() {
     echo "$1" >&2; exit 1
@@ -23,9 +24,9 @@ show_help() {
     "-h " "prints this overview"  \
     "-i <integer>" "applys/cancels effect in specified intervall (seconds)"
     printf '    *** configs ***\n'
-    printf '    The ui is initialized with integers from <script dir>/if.conf, if such a file exists.\n'
-    printf '    The first two integers from every line in if.conf are interpreted as loss %% (first) and\n'
-    printf '    bandwidth reduction %% (second) values for the ui. \n'
+    printf '    The ui is initialized with integers from <script dir>/if-<hostname>.conf, if such a file exists.\n'
+    printf '    The first two integers from every line in if-<hostname>.conf are interpreted as loss %% (first) \n'
+    printf '    and bandwidth reduction %% (second) values for the ui. \n'
     printf '    Every line represents an interface. Since there are no identifiers that map the lines to\n'
     printf '    the interfaces, the sorting of the lines must mirror the sorting of the ui.\n\n'
 }
@@ -54,7 +55,7 @@ resetui() {
 
 initui() {
     
-    local conf="${WORK_LOCATION}/if.conf"
+    local conf="${WORK_LOCATION}/if-${HOSTNAME}.conf"
     local -a pl_vals=() br_vals=()
     local line v1 v2 rest iface
 
@@ -62,9 +63,9 @@ initui() {
         while IFS= read -r line || [[ -n "$line" ]]; do
             read -r v1 v2 rest <<< "$line"
 
-            if [ $v1 -ge 0 ] && [ 100 -ge $v1 ] 2> /dev/null; then pl_vals+=("$v1"); else pl_vals+=("0"); fi
+            if [ $v1 -ge 0 ] 2> /dev/null && [ 100 -ge $v1 ] 2> /dev/null; then pl_vals+=("$v1"); else pl_vals+=("0"); fi
 
-            if [ $v2 -ge 0 ] && [ 100 -ge $v2 ] 2> /dev/null; then br_vals+=("$v2"); else br_vals+=("0"); fi
+            if [ $v2 -ge 0 ] 2> /dev/null && [ 100 -ge $v2 ] 2> /dev/null; then br_vals+=("$v2"); else br_vals+=("0"); fi
             
         done < "$conf"
     fi
@@ -148,6 +149,22 @@ apply() {
     done
 }
 
+#does not work as intend
+activesleep() {
+    local passedtime=0
+    while true; do
+        sleep 1
+        passedtime=$(( passedtime + 1 ))
+        if [ $passedtime -ge $interval ]; then
+            if read -t 0 -r; then
+                read -r
+                break
+            fi
+        fi
+    done
+}
+
+
 # drawing
 draw_bar() {
     local pct=$1 cur=$2 width=20 filled i bar=""
@@ -164,6 +181,8 @@ render() {
     local i iface pctifpl pctifbr marker
     
     printf '\e[H\e[2J'
+
+    #printf '  \e[1m%s %17s %17s %17s \n' " " " " "packet loss" "bw. reduction"
     
     #header
     printf '  %s %-17s ' " " " " 
